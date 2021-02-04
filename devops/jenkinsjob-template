@@ -1,0 +1,33 @@
+- job-template:
+    # default variable
+    disable_job:
+    description:
+    disable_master:
+    git_credentials_id: 'mytestid'
+    job_folder: 'mygroup'
+    # job configuration
+    name: '{job_folder}/{customer}'
+    id: 'multibranch'
+    description: '{description}'
+    display-name: '{customer}'
+    periodic-folder-trigger: '1m'
+    project-type: multibranch
+    number-to-keep: '10'
+    script-path: Jenkinsfile
+    disabled: '{disable_job}'
+    scm:
+      - git:
+          url: 'https://example.com/sample.git'
+          credentials-id: '{git_credentials_id}'
+          discover-tags: true
+          property-strategies:
+            named-branches:
+              exceptions:
+                - exception:
+                    branch-name: 'master,main'
+                    properties:
+                      - suppress-scm-triggering: '{disable_master}'
+
+- job:
+    name: mygroup
+    project-type: folder
