@@ -1,6 +1,124 @@
 
+### Helm deployment of jenkins
 
 
+* Add all the helm repo to your system
+
+```shell
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add jetstack https://charts.jetstack.io
+helm repo add jenkins https://charts.jenkins.io
+helm repo update
+```
+
+### Create an ingress controller
+
+```shell
+kubectl create ns ingress-controller
+
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+    --namespace=ingress-controller \
+    --set controller.replicaCount=2 \
+    --set controller.nodeSelector."beta\.kubernetes\.io/os"=linux \
+    --set defaultBackend.nodeSelector."beta\.kubernetes\.io/os"=linux
+```
+
+* Get the LoadBalancer IP to access Ingress controller
+
+```shell
+kubectl -n ingress-controller get svc ingress-nginx-controller -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+```
+
+* Install Cert Manager
+
+```shell
+kubectl create ns cert-manager
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.1.0/cert-manager.crds.yaml
+helm install cert-manager jetstack/cert-manager --namespace=cert-manager --version v1.1.0
+```
+
+* Create a CA ClusterIssuer
+
+Please update email: `mymail@gmail.com` part with your mail id in production.
+
+```code
+apiVersion: cert-manager.io/v1alpha2
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: mymail@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-production
+    solvers:
+    - http01:
+       ingress:
+         class: nginx
+```
+
+```shell
+kubectl apply -f ./certManagerCI_production.yaml
+```
+
+* Test the certificate issuer to test the webhook works okay
+
+```shell
+kubectl apply -f test-resources.yaml
+kubectl describe certificate -n cert-manager-test
+kubectl delete -f test-resources.yaml
+```
+
+
+### Configure Kubernetes Cluster and Create node-pools with the following labels
+
+```code
+server-use: server (dedicated instance)
+server-use: agent (preemtable instance)
+```
+
+* Take a look into these parameters in `values.yaml` file
+
+```code
+controller
+  adminUser
+  serviceType
+  loadBalancerSourceRanges
+  additionalPlugins
+  JCasC
+  nodeSelector
+  ingress
+  httpsKeyStore
+
+agent
+  namespace
+  image
+  resources
+  nodeSelector
+
+backup
+```
+
+* update the github organisation's OAuth App (optional, needed if you are using the Github OAuth)
+
+```code
+https://jenkins_url/securityRealm/finishLogin
+```
+
+* deploy jenkins
+
+```shell
+helm -n jenkins install jenkins-server jenkins/jenkins -f jenkins-values.yaml
+```
+
+* `ClusterIP` can access from localhost
+
+```shell
+kubectl port-forward service/jenkins-server 8080:8080
+```
+
+[ref](https://github.com/jenkinsci/helm-charts/tree/main/charts/jenkins)
 
 
 ### Jenkins Installation (master or slave need to configure accordingly)
@@ -90,6 +208,7 @@ JENKINS_ARGS="--webroot=/var/cache/$NAME/war --httpsPort=8443 --httpsKeyStore=/v
 ```
 
 [ssl ref](https://wiki.wocommunity.org/display/documentation/Installing+and+Configuring+Jenkins)
+
 [ssl ref 1](https://devopscube.com/configure-ssl-jenkins/)
 
 
@@ -125,29 +244,21 @@ query_plugins_info=False
 ```
 
 
-#### example
+#### job template
 
 ```code
-- project:
-    name: my_project
-    jobs:
-        - 'multibranch':
-            customer: customer_1
-            disable_job: false
-            disable_master: true
-            description: 'pipeline cicd job for {customer}'
-
 - job-template:
     # default variable
-    disable_job:
-    description:
-    disable_master:
-    git_credentials_id: 'mytestid'
-    job_folder: 'mygroup'
+    disable_job: false
+    job_description: 'Do not edit this job through the web....!!!'
+    trigger_branch: 'master,main,develop'
+    git_repo_url: git@github.com:mytest/jobs.git
+    git_credentials_id: 'jenkins-credential-id'
+    job_folder: 'cicd_pipeline'
     # job configuration
     name: '{job_folder}/{customer}'
-    id: 'multibranch'
-    description: '{description}'
+    id: 'branch-pipeline'
+    description: '{job_description}'
     display-name: '{customer}'
     periodic-folder-trigger: '1m'
     project-type: multibranch
@@ -156,21 +267,51 @@ query_plugins_info=False
     disabled: '{disable_job}'
     scm:
       - git:
-          url: 'https://example.com/sample.git'
+          url: '{git_repo_url}'
           credentials-id: '{git_credentials_id}'
-          discover-tags: true
+          discover-tags: false
+          build-strategies:
+            - all-strategies-match:
+                strategies:
+                  - regular-branches: true
           property-strategies:
             named-branches:
+              defaults:
+                - suppress-scm-triggering: true
               exceptions:
                 - exception:
-                    branch-name: 'master,main'
+                    branch-name: '{trigger_branch}'
                     properties:
-                      - suppress-scm-triggering: '{disable_master}'
+                      - suppress-scm-triggering: false
 
 - job:
-    name: mygroup
+    name: cicd_pipeline
     project-type: folder
 ```
+
+
+#### job profiles
+
+This job profiles will use the above job template for the job creation, make sure that you add the job profile and job template in a single file : `Jenkinsjob`
+
+
+```code
+- project:
+    name: my_project
+    customer:
+        - ubuntu:
+            disable_job: true
+            trigger_branch: 'master,main,develop'
+            job_description: 'pipeline job for ubuntu deployment'
+        - centos
+        - redhat
+        - debian
+    jobs:
+        - branch-pipeline
+```
+
+
+
 
 ```shell
 # create jenkins job
@@ -183,8 +324,13 @@ jenkins-jobs --conf keystore/jenkins_jobs.ini update jenkins-jobs/Jenkinsjob --d
 
 
 [ref 1](https://medium.com/slalom-build/automatically-generating-jenkins-jobs-d30d4b0a2b49)
+
 [Jenkins Job Builder install & config official](https://jenkins-job-builder.readthedocs.io/en/latest/installation.html)
+
 [Jenkins Job Builder definition official](https://docs.openstack.org/infra/jenkins-job-builder/definition.html)
+
 [Job DSL Plugin official](https://jenkinsci.github.io/job-dsl-plugin/#path/folder)
+
 [Job DSL Plugin ref 1](https://www.digitalocean.com/community/tutorials/how-to-automate-jenkins-job-configuration-using-job-dsl)
+
 [Job DSL Plugin ref 2](https://metadrop.net/en/articles/jenkins-and-job-dsl-plugin)

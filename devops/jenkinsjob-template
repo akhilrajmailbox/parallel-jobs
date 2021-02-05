@@ -1,14 +1,15 @@
 - job-template:
     # default variable
-    disable_job:
-    description:
-    disable_master:
-    git_credentials_id: 'mytestid'
-    job_folder: 'mygroup'
+    disable_job: false
+    job_description: 'Do not edit this job through the web....!!!'
+    trigger_branch: 'master,main'
+    git_repo_url: ${scmUrl}
+    git_credentials_id: 'e322970b-5053-4f54-8b84-3c6f1f3ad32a'
+    job_folder: 'customer_cicd'
     # job configuration
     name: '{job_folder}/{customer}'
-    id: 'multibranch'
-    description: '{description}'
+    id: 'branch-pipeline'
+    description: '{job_description}'
     display-name: '{customer}'
     periodic-folder-trigger: '1m'
     project-type: multibranch
@@ -17,17 +18,23 @@
     disabled: '{disable_job}'
     scm:
       - git:
-          url: 'https://example.com/sample.git'
+          url: '{git_repo_url}'
           credentials-id: '{git_credentials_id}'
-          discover-tags: true
+          discover-tags: false
+          build-strategies:
+            - all-strategies-match:
+                strategies:
+                  - regular-branches: true
           property-strategies:
             named-branches:
+              defaults:
+                - suppress-scm-triggering: true
               exceptions:
                 - exception:
-                    branch-name: 'master,main'
+                    branch-name: '{trigger_branch}'
                     properties:
-                      - suppress-scm-triggering: '{disable_master}'
+                      - suppress-scm-triggering: false
 
 - job:
-    name: mygroup
+    name: customer_cicd
     project-type: folder

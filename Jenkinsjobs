@@ -1,8 +1,0 @@
-- project:
-    name: my_project
-    jobs:
-        - 'multibranch':
-            customer: customer_1
-            disable_job: false
-            disable_master: true
-            description: 'pipeline cicd job for {customer}'

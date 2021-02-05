@@ -7,38 +7,38 @@ switch (BRANCH_NAME) {
         ENABLE_DEPLOY = 'true'
         break
     case "main":
-        ENABLE_DEPLOY = 'false'
+        ENABLE_DEPLOY = 'true'
         break
 }
 
-echo $JOB_NAME
-
-if (JOB_NAME == 'job-seeder') {
+if (JOB_NAME == 'job-seeder/main') {
     node() {
         stage('Checkout SCM') {
             checkout scm
         }
-        stage('Update jobs') {
-            sh """
-                jobfile=$(mktemp)
-                cat Jenkinsjobs > ${jobfile}
-                echo -e "\n\n" >> ${jobfile}
-                cat ./devops/jenkinsjob-template >> ${jobfile}
-                jenkins-jobs --conf ./devops/jenkins_jobs.ini update ${jobfile}
-            """
-        }       
+        def scmUrl = scm.getUserRemoteConfigs()[0].getUrl()
+        withEnv(["scmUrl=${scmUrl}"]) {
+            stage('Update jobs') {
+                sh '''#!/bin/bash
+                    jobfile="$(mktemp)"
+                    envsubst < Jenkinsjob > "${jobfile}"
+                    echo -e "\n\n" >> "${jobfile}"
+                    envsubst < ./devops/jenkinsjob-template >> "${jobfile}"
+                    jenkins-jobs --conf ${JENKINS_HOME}/keystore/jenkins_jobs.ini update "${jobfile}" --delete-old
+                    rm -rf "${jobfile}"
+                '''
+            }
+        }
     }
 } else {
-
-if (ENABLE_DEPLOY == 'true') {
-    node() {
-        stage('Checkout SCM') {
-            checkout scm
-        }
-        stage('nothing') {
-            echo "${JOB_NAME}"
+    if (ENABLE_DEPLOY == 'true') {
+        node() {
+            stage('Checkout SCM') {
+                checkout scm
+            }
+            stage('nothing') {
+                echo "JOB_NAME is : ${JOB_NAME}"
+            }
         }
     }
-}
-
 }
